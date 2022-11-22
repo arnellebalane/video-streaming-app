@@ -5,12 +5,15 @@ const mimeType = 'video/mp4; codecs="avc1.424034"';
 
 const videoDuration = 14 * 60 + 48.053;
 const segmentDuration = 4.011;
-const representation = '480p';
+const representations = ['480p', '720p', '1080p'];
+let representation = representations[0];
 const segmentMaxNumber = 222;
 let segmentNumber = 1;
-let sourceBufferQueue = [];
+const sourceBufferQueue = [];
 
-let video;
+const video = document.querySelector('.video');
+const controls = document.querySelector('.controls');
+
 let mediaSource;
 let sourceBuffer;
 
@@ -18,6 +21,7 @@ let sourceBuffer;
   mediaSource = new MediaSource();
 
   await createVideoElement();
+  await initializeUserInterface();
   await initializeSourceBuffer();
   await processSourceBufferQueue();
   await loadNextSegment(5);
@@ -26,14 +30,37 @@ let sourceBuffer;
 })();
 
 async function createVideoElement() {
-  video = document.createElement('video');
-  video.controls = true;
   video.src = URL.createObjectURL(mediaSource);
-
-  document.body.append(video);
-
   await new Promise((resolve) => {
     mediaSource.addEventListener('sourceopen', resolve, { once: true });
+  });
+  video.classList.remove('hidden');
+}
+
+async function initializeUserInterface() {
+  const activeClass = 'active';
+
+  for (const rep of representations) {
+    const button = document.createElement('button');
+    button.dataset.quality = rep;
+    button.textContent = rep;
+    if (rep === representation) {
+      button.classList.add(activeClass);
+    }
+    controls.append(button);
+  }
+
+  controls.addEventListener('click', (event) => {
+    const target = event.target.closest('button');
+    if (target) {
+      const current = controls.querySelector('.active');
+      if (current) {
+        current.classList.remove(activeClass);
+      }
+      target.classList.add(activeClass);
+      representation = target.dataset.quality;
+      initializeSourceBuffer();
+    }
   });
 }
 
@@ -42,7 +69,9 @@ async function initializeSourceBuffer() {
   const initializationResponse = await fetch(initializationUrl);
   const initializationBuffer = await initializationResponse.arrayBuffer();
 
-  sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+  if (!sourceBuffer) {
+    sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+  }
   sourceBufferQueue.push(initializationBuffer);
 }
 

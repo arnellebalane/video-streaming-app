@@ -22,3 +22,28 @@ video {
   max-width: 100%;
   max-height: 100%;
 }
+
+.hidden {
+  display: none;
+}
+
+.controls {
+  margin-top: 1.6rem;
+  text-align: center;
+}
+
+.controls button {
+  display: inline-block;
+  height: 3.2rem;
+  width: 7.6rem;
+  padding: 0;
+  border: none;
+  margin: 0.2rem;
+
+  font-family: 'Monaco';
+  cursor: pointer;
+}
+
+.controls button.active {
+  background-color: #fbbf24;
+}
