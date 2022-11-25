@@ -1,13 +1,15 @@
 const manifestUrl = 'dash/manifest.mpd';
-const template = 'dash/segment-$RepresentationID$-$Number$.m4s';
-const initialization = 'dash/segment-$RepresentationID$-.mp4';
-const mimeType = 'video/mp4; codecs="avc1.424034"';
 
-const videoDuration = 14 * 60 + 48.053;
-const segmentDuration = 4.011;
-const representations = ['480p', '720p', '1080p'];
-let representation = representations[0];
-const segmentMaxNumber = 222;
+let manifestBaseUrl;
+let initTmpl;
+let segmentTmpl;
+let mimeType;
+let videoDuration;
+let segmentDuration;
+let segmentMax;
+let representations;
+
+let representation;
 let segmentNumber = 1;
 const sourceBufferQueue = [];
 
@@ -20,7 +22,8 @@ let sourceBuffer;
 (async () => {
   mediaSource = new MediaSource();
 
-  await createVideoElement();
+  await initializeManifestFile();
+  await initializeVideoElement();
   await initializeUserInterface();
   await initializeSourceBuffer();
   await processSourceBufferQueue();
@@ -29,7 +32,29 @@ let sourceBuffer;
   await loadSegmentsOnSeek();
 })();
 
-async function createVideoElement() {
+async function initializeManifestFile() {
+  const manifestResponse = await fetch(manifestUrl);
+  const manifestText = await manifestResponse.text();
+
+  const parser = new DOMParser();
+  const manifest = parser.parseFromString(manifestText, 'text/xml');
+
+  manifestBaseUrl = manifestResponse.url.split('/').slice(0, -1).join('/') + '/';
+  initTmpl = manifest.querySelectorAll('SegmentTemplate')[0].getAttribute('initialization');
+  segmentTmpl = manifest.querySelectorAll('SegmentTemplate')[0].getAttribute('media');
+  mimeType = 'video/mp4; codecs="avc1.424034"';
+  videoDuration = convertPresentationTimeToSeconds(
+    manifest.querySelector('MPD').getAttribute('mediaPresentationDuration')
+  );
+  segmentDuration = convertPresentationTimeToSeconds(manifest.querySelector('MPD').getAttribute('maxSegmentDuration'));
+  segmentMax = Math.ceil(videoDuration / segmentDuration);
+  representations = [...manifest.querySelectorAll('AdaptationSet:first-child Representation')].map((representation) =>
+    representation.getAttribute('id')
+  );
+  representation = representations[0];
+}
+
+async function initializeVideoElement() {
   video.src = URL.createObjectURL(mediaSource);
   await new Promise((resolve) => {
     mediaSource.addEventListener('sourceopen', resolve, { once: true });
@@ -65,19 +90,20 @@ async function initializeUserInterface() {
 }
 
 async function initializeSourceBuffer() {
-  const initializationUrl = initialization.replace('$RepresentationID$', representation);
-  const initializationResponse = await fetch(initializationUrl);
-  const initializationBuffer = await initializationResponse.arrayBuffer();
+  const initUrl = manifestBaseUrl + initTmpl.replace('$RepresentationID$', representation);
+  const initResponse = await fetch(initUrl);
+  const initBuffer = await initResponse.arrayBuffer();
 
   if (!sourceBuffer) {
     sourceBuffer = mediaSource.addSourceBuffer(mimeType);
   }
-  sourceBufferQueue.push(initializationBuffer);
+  sourceBufferQueue.push(initBuffer);
 }
 
 async function loadNextSegment(segmentsToLoad = 1) {
   while (segmentsToLoad-- > 0) {
-    const segmentUrl = template.replace('$RepresentationID$', representation).replace('$Number$', segmentNumber++);
+    const segmentUrl =
+      manifestBaseUrl + segmentTmpl.replace('$RepresentationID$', representation).replace('$Number$', segmentNumber++);
     const segmentResponse = await fetch(segmentUrl);
     const segmentBuffer = await segmentResponse.arrayBuffer();
     sourceBufferQueue.push(segmentBuffer);
@@ -88,7 +114,7 @@ async function loadSegmentsOnTimeUpdate() {
   const timeRangeAllowance = 4; // seconds
   video.addEventListener('timeupdate', async () => {
     const timeRange = getCurrentTimeRange();
-    if (timeRange && video.currentTime > timeRange.end - timeRangeAllowance && segmentNumber <= segmentMaxNumber) {
+    if (timeRange && video.currentTime > timeRange.end - timeRangeAllowance && segmentNumber <= segmentMax) {
       await loadNextSegment();
     }
   });
@@ -128,4 +154,16 @@ function getCurrentTimeRange() {
     }
   }
   return null;
+}
+
+function convertPresentationTimeToSeconds(time) {
+  const match = time.match(/^PT(\d+)H(\d+)M(\d+(?:\.\d+)?)S$/);
+  if (match) {
+    let [, hours, minutes, seconds] = match;
+    hours = parseInt(hours);
+    minutes = parseInt(minutes);
+    seconds = parseFloat(seconds);
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  return 0;
 }
